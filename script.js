@@ -14,23 +14,68 @@ document.addEventListener('DOMContentLoaded', function() {
     const absenKeluarButton = document.getElementById('absen-keluar');
     const riwayatAbsensiList = document.getElementById('riwayat-absensi');
     const formAbsensi = document.getElementById('form-absensi');
+    const lokasiError = document.getElementById('lokasi-error');
+
+    const targetLatitude = -6.3178501;
+    const targetLongitude = 107.3071573;
+    const radius = 30; // dalam meter
 
     let streamKamera;
     let fotoBase64;
-    let lokasiKoordinat;
+    let currentLatitude;
+    let currentLongitude;
+
+    // Fungsi untuk menghitung jarak antara dua titik koordinat (Haversine formula)
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371e3; // radius bumi dalam meter
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        const distance = R * c; // dalam meter
+        return distance;
+    }
 
     // Fungsi untuk mendapatkan lokasi
     function dapatkanLokasi() {
         if (navigator.geolocation) {
             koordinatInput.value = 'Mencari lokasi...';
+            lokasiError.style.display = 'none';
+            absenMasukButton.disabled = true;
+            absenKeluarButton.disabled = true;
             navigator.geolocation.getCurrentPosition(posisi => {
-                lokasiKoordinat = `${posisi.coords.latitude}, ${posisi.coords.longitude}`;
-                koordinatInput.value = lokasiKoordinat;
+                currentLatitude = posisi.coords.latitude;
+                currentLongitude = posisi.coords.longitude;
+                koordinatInput.value = `${currentLatitude}, ${currentLongitude}`;
+                const distance = calculateDistance(currentLatitude, currentLongitude, targetLatitude, targetLongitude);
+                if (distance <= radius) {
+                    lokasiError.style.display = 'none';
+                    absenMasukButton.disabled = false;
+                    absenKeluarButton.disabled = false;
+                } else {
+                    lokasiError.style.display = 'block';
+                    absenMasukButton.disabled = true;
+                    absenKeluarButton.disabled = true;
+                }
             }, () => {
                 koordinatInput.value = 'Gagal mendapatkan lokasi.';
+                lokasiError.style.display = 'block';
+                lokasiError.textContent = 'Gagal mendapatkan lokasi.';
+                absenMasukButton.disabled = true;
+                absenKeluarButton.disabled = true;
             });
         } else {
             koordinatInput.value = 'Geolocation tidak didukung oleh browser Anda.';
+            lokasiError.style.display = 'block';
+            lokasiError.textContent = 'Geolocation tidak didukung oleh browser Anda.';
+            absenMasukButton.disabled = true;
+            absenKeluarButton.disabled = true;
         }
     }
 
@@ -40,7 +85,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Fungsi untuk mengaktifkan kamera
     async function aktifkanKamera() {
         try {
-            streamKamera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); // Gunakan kamera depan
+            streamKamera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
             videoElement.srcObject = streamKamera;
         } catch (error) {
             console.error('Gagal mengakses kamera.', error);
@@ -97,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const listItem = document.createElement('li');
                 const imgElement = item.foto ? `<img src="${item.foto}" alt="Foto Absensi" style="max-width: 80px; height: auto;">` : 'Tidak ada foto';
                 listItem.innerHTML = `
-                    <strong>${item.nama}</strong> (${item.nip}) - ${item.jenis} pada ${item.waktu}<br>
+                    <strong><span class="math-inline">\{item\.nama\}</strong\> \(</span>{item.nip}) - ${item.jenis} pada ${item.waktu}<br>
                     Pangkat/Golongan: ${item.pangkat}, Jabatan: ${item.jabatan}, Unit Kerja: ${item.unitKerja}<br>
                     Koordinat: ${item.koordinat}<br>
                     Foto: ${imgElement}
@@ -115,31 +160,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const jabatan = jabatanInput.value.trim();
         const unitKerja = unitKerjaInput.value.trim();
 
-        if (nama && nip && pangkat && jabatan && unitKerja && lokasiKoordinat && fotoBase64) {
-            const waktu = new Date().toLocaleString();
-            simpanAbsensi(nama, nip, pangkat, jabatan, unitKerja, lokasiKoordinat, fotoBase64, waktu, jenisAbsensi);
-            formAbsensi.reset(); // Reset form setelah absensi
-            koordinatInput.value = 'Mencari lokasi...';
-            hasilFotoElement.style.display = 'none';
-            fotoBase64 = null;
-            lokasiKoordinat = null;
-            dapatkanLokasi(); // Ambil lokasi lagi untuk absensi berikutnya
+        if (nama && nip && pangkat && jabatan && unitKerja && currentLatitude && currentLongitude && fotoBase64) {
+            const distance = calculateDistance(currentLatitude, currentLongitude, targetLatitude, targetLongitude);
+            if (distance <= radius) {
+                const waktu = new Date().toLocaleString();
+                simpanAbsensi(nama, nip, pangkat, jabatan, unitKerja, `${currentLatitude}, ${currentLongitude}`, fotoBase64, waktu, jenisAbsensi);
+                formAbsensi.reset();
+                koordinatInput.value = 'Mencari lokasi...';
+                hasilFotoElement.style.display = 'none';
+                fotoBase64 = null;
+                dapatkanLokasi(); // Ambil lokasi lagi setelah absen
+            } else {
+                alert('Anda berada di luar radius 30 meter dan tidak dapat melakukan absensi.');
+                lokasiError.style.display = 'block';
+            }
         } else {
-            alert('Harap isi semua data, ambil lokasi, dan ambil foto sebelum absen.');
-        }
-    }
-
-    // Event listener untuk tombol Absen Masuk
-    absenMasukButton.addEventListener('click', function() {
-        lakukanAbsensi('Masuk');
-    });
-
-    // Event listener untuk tombol Absen Keluar
-    absenKeluarButton.addEventListener('click', function() {
-        lakukanAbsensi('Keluar');
-    });
-
-    // Tampilkan riwayat absensi saat halaman dimuat
-    tampilkanRiwayatAbsensi();
-    dapatkanLokasi(); // Ambil lokasi awal saat halaman dimuat
-});
+            alert('
